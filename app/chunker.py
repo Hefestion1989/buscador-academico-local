@@ -18,6 +18,7 @@ def make_chunks(
     chunk_size: int = CHUNK_SIZE,
     overlap: int = CHUNK_OVERLAP,
 ) -> list[TextChunk]:
+    validate_chunk_settings(chunk_size, overlap)
     chunks: list[TextChunk] = []
     current_parts: list[str] = []
     current_length = 0
@@ -69,10 +70,10 @@ def make_chunks(
 
 
 def split_long_text(text: str, chunk_size: int, overlap: int) -> list[str]:
+    validate_chunk_settings(chunk_size, overlap)
     parts: list[str] = []
     start = 0
     text = text.strip()
-    step = max(1, chunk_size - overlap)
 
     while start < len(text):
         end = min(len(text), start + chunk_size)
@@ -86,3 +87,12 @@ def split_long_text(text: str, chunk_size: int, overlap: int) -> list[str]:
         start = max(0, end - overlap)
 
     return [part for part in parts if part]
+
+
+def validate_chunk_settings(chunk_size: int, overlap: int) -> None:
+    if chunk_size <= 0:
+        raise ValueError("chunk_size debe ser mayor que cero")
+    if overlap < 0:
+        raise ValueError("overlap no puede ser negativo")
+    if overlap >= chunk_size:
+        raise ValueError("overlap debe ser menor que chunk_size")

@@ -47,6 +47,9 @@ See [PRIVACY.md](PRIVACY.md) before publishing forks or releases.
 - PowerShell.
 - Internet for the initial dependency/model download.
 
+The direct Python dependencies are pinned in `requirements.txt`, so setup uses
+the same application versions on every fresh installation.
+
 ## Quick Start
 
 Open PowerShell in this folder and run:
@@ -191,6 +194,19 @@ The ZIP is created under:
 ```text
 dist\academic-semantic-search.zip
 ```
+
+## Development Checks
+
+The core tests use Python's standard library and do not download the embedding
+model:
+
+```powershell
+python -m compileall -q app tests
+python -m unittest discover -s tests -v
+```
+
+GitHub Actions repeats these checks on Windows, installs the pinned
+dependencies and verifies their consistency with `pip check`.
 
 ## License
 
