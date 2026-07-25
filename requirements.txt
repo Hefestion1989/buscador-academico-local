@@ -1,7 +1,8 @@
-streamlit>=1.36.0
-chromadb>=0.5.0
-sentence-transformers>=3.0.0
-pypdf>=4.2.0
-PyMuPDF>=1.28.0
-python-docx>=1.1.0
-tqdm>=4.66.0
+# Dependencias directas fijadas para que una instalación nueva use las mismas
+# versiones probadas. Dependabot puede proponer actualizaciones controladas.
+streamlit==1.60.0
+chromadb==1.5.9
+sentence-transformers==5.6.1
+pypdf==6.14.2
+PyMuPDF==1.28.0
+python-docx==1.2.0
