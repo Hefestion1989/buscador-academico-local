@@ -51,9 +51,12 @@ class FileHandlingTests(unittest.TestCase):
             (root / ".venv" / "paquete.txt").write_text("no", encoding="utf-8")
             (root / "~$temporal.docx").write_bytes(b"temporal")
 
-            files = [path.relative_to(root).as_posix() for path in iter_document_files(root)]
+            files = list(iter_document_files(root))
 
-        self.assertEqual(files, ["notas/tema.MD"])
+        self.assertEqual(
+            [(path.parent.name, path.name) for path in files],
+            [("notas", "tema.MD")],
+        )
 
     def test_text_extractor_handles_windows_encoding(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
