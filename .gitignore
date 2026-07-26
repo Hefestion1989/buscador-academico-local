@@ -6,6 +6,9 @@ logs/
 *.log
 *.pid
 dist/
+node_modules/
+*.tsbuildinfo
+.vite/
 .env
 .streamlit/secrets.toml
 *.sqlite
