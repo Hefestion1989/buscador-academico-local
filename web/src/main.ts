@@ -1,6 +1,17 @@
 import "./style.css";
 
-import { createDemoBase, DEMO_BASE_ID } from "./demo";
+import {
+  createDemoBase,
+  DEMO_BASE_ID,
+  LEGACY_DEMO_BASE_IDS,
+} from "./demo";
+import {
+  isOcrCancellation,
+  type OcrChoice,
+  type OcrLanguage,
+  type OcrProgress,
+  type OcrRequest,
+} from "./ocr";
 import {
   chunksFromSources,
   parseFiles,
@@ -25,9 +36,10 @@ import type {
 } from "./types";
 
 const EXAMPLE_QUERY =
-  "¿Cuándo sacó la APA la homosexualidad del DSM, quién participó y en qué momento?";
+  "¿Cómo ayudan el sueño y la práctica distribuida a consolidar la memoria?";
 const LAST_BASE_KEY = "rastreador-last-base";
 const DEMO_DISMISSED_KEY = "rastreador-demo-dismissed";
+const OCR_LANGUAGE_KEY = "rastreador-ocr-language";
 
 interface AppState {
   bases: KnowledgeBase[];
@@ -40,6 +52,8 @@ interface AppState {
   notice: string;
   noticeTone: "info" | "success" | "error";
   progress?: SemanticProgress;
+  ocrPrompt?: OcrRequest;
+  ocrProgress?: OcrProgress;
 }
 
 const rootElement = document.querySelector<HTMLDivElement>("#app");
@@ -61,6 +75,8 @@ const state: AppState = {
 };
 
 let semanticEngine: SemanticEngine | undefined;
+let activeImportController: AbortController | undefined;
+let resolveOcrChoice: ((choice: OcrChoice) => void) | undefined;
 
 void initialize();
 
@@ -68,6 +84,16 @@ async function initialize(): Promise<void> {
   try {
     state.bases = await listKnowledgeBases();
     const dismissedDemo = localStorage.getItem(DEMO_DISMISSED_KEY) === "1";
+    const legacyDemoIds = new Set(LEGACY_DEMO_BASE_IDS);
+    const legacyDemos = state.bases.filter((base) =>
+      legacyDemoIds.has(base.id),
+    );
+    for (const legacyDemo of legacyDemos) {
+      await deleteKnowledgeBase(legacyDemo.id);
+    }
+    if (legacyDemos.length) {
+      state.bases = state.bases.filter((base) => !legacyDemoIds.has(base.id));
+    }
     if (
       !dismissedDemo &&
       !state.bases.some((base) => base.id === DEMO_BASE_ID)
@@ -136,8 +162,9 @@ function render(): void {
             <p class="eyebrow">TU INFORMACIÓN, CON EVIDENCIA A LA VISTA</p>
             <h1 id="hero-title">Preguntá por una idea.<br />Volvé al pasaje exacto.</h1>
             <p>
-              Cargá documentos o tablas, escribí una pregunta normal y encontrá
-              <strong>qué dice la base, dónde lo dice y de qué fuente salió</strong>.
+              Subí apuntes de facultad, investigaciones, documentos de trabajo
+              o materiales de cualquier área. Después preguntá con tus palabras
+              y encontrá <strong>qué dice la base, dónde lo dice y de qué fuente salió</strong>.
             </p>
           </div>
 
@@ -147,7 +174,7 @@ function render(): void {
               id="query"
               name="query"
               rows="3"
-              placeholder="Ej.: ¿quién tomó la decisión, cuándo y dónde se menciona?"
+              placeholder="Ej.: ¿cómo se relacionan estos conceptos y dónde se explica?"
             >${escapeHtml(state.query)}</textarea>
             <div class="search-controls">
               <label class="mode-control">
@@ -165,7 +192,7 @@ function render(): void {
             <div class="example-row">
               <span>Probá:</span>
               <button type="button" class="text-example" id="example-query">
-                “¿Cuándo la APA retiró la homosexualidad del DSM?”
+                “¿Cómo ayudan el sueño y la práctica distribuida a la memoria?”
               </button>
             </div>
           </form>
@@ -209,6 +236,7 @@ function render(): void {
               <span class="drop-icon" aria-hidden="true">＋</span>
               <strong>Arrastrá archivos o elegilos</strong>
               <small>PDF, DOCX, TXT, MD, CSV, TSV, JSON, JSONL, RTF, HTML</small>
+              <em>Puede ser material de estudio o de cualquier otro tema. Si un PDF es escaneado, ofreceremos OCR.</em>
               <input
                 id="file-input"
                 type="file"
@@ -271,7 +299,8 @@ function render(): void {
             <p class="local-note">
               <span aria-hidden="true">⌂</span>
               Los archivos, fragmentos y consultas permanecen en este navegador.
-              Al activar ideas, solo se descargan los archivos del modelo.
+              Ideas y OCR solo descargan sus motores e idiomas; el material no
+              se envía para procesarlo.
             </p>
           </aside>
 
@@ -296,7 +325,7 @@ function render(): void {
         <section class="method-strip" aria-label="Cómo funciona">
           <article>
             <span>1</span>
-            <div><strong>Fragmenta</strong><p>Conserva archivo, página, fila o línea.</p></div>
+            <div><strong>Lee y aplica OCR</strong><p>Detecta páginas escaneadas sin texto.</p></div>
           </article>
           <article>
             <span>2</span>
@@ -316,6 +345,7 @@ function render(): void {
         </p>
         <span>Edición web local · MIT</span>
       </footer>
+      ${renderOcrOverlay()}
     </div>
   `;
 
@@ -340,8 +370,8 @@ function renderResults(base: KnowledgeBase, semanticReady: boolean): string {
         <h3>La base está lista para una pregunta.</h3>
         <p>
           Podés buscar una expresión exacta o describir una idea. El sistema
-          mostrará primero los pasajes que contienen fechas, personas o acciones
-          pedidas en la consulta.
+          puede localizar definiciones, relaciones, fechas, personas o acciones
+          y siempre vuelve al pasaje correspondiente.
         </p>
         ${
           semanticReady
@@ -351,7 +381,7 @@ function renderResults(base: KnowledgeBase, semanticReady: boolean): string {
         <div class="example-anatomy">
           <span>CONSULTA DE EJEMPLO</span>
           <p>${escapeHtml(EXAMPLE_QUERY)}</p>
-          <small>La base de ejemplo distingue la decisión de 1973, sus protagonistas y la categoría residual eliminada en 1987.</small>
+          <small>La demostración relaciona sueño, práctica distribuida y recuperación activa. Para usarla con otro tema, solo hay que crear una base y subir el material correspondiente.</small>
         </div>
       </div>
     `;
@@ -462,6 +492,86 @@ function renderNotice(): string {
   `;
 }
 
+function renderOcrOverlay(): string {
+  if (state.ocrPrompt) {
+    const request = state.ocrPrompt;
+    const pageCount = request.pageNumbers.length;
+    const preview = request.pageNumbers.slice(0, 8).join(", ");
+    const remaining = Math.max(0, pageCount - 8);
+    return `
+      <div class="modal-backdrop">
+        <section
+          class="ocr-dialog"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="ocr-title"
+          aria-describedby="ocr-description"
+        >
+          <div class="ocr-symbol" aria-hidden="true">OCR</div>
+          <p class="section-kicker">PDF ESCANEADO DETECTADO</p>
+          <h2 id="ocr-title">¿Aplicar reconocimiento de texto?</h2>
+          <p id="ocr-description">
+            “${escapeHtml(request.fileName)}” tiene
+            <strong>${pageCount} página${pageCount === 1 ? "" : "s"} sin texto seleccionable</strong>
+            de ${request.totalPages}. El OCR se ejecuta en este navegador y conserva
+            el número de página.
+          </p>
+          <p class="ocr-pages">
+            Páginas: ${escapeHtml(preview)}${remaining ? ` y ${remaining} más` : ""}
+          </p>
+          <label for="ocr-language">Idioma principal del material</label>
+          <select id="ocr-language">
+            <option value="spa" ${preferredOcrLanguage() === "spa" ? "selected" : ""}>Español · más rápido</option>
+            <option value="eng" ${preferredOcrLanguage() === "eng" ? "selected" : ""}>Inglés</option>
+            <option value="spa+eng" ${preferredOcrLanguage() === "spa+eng" ? "selected" : ""}>Español + inglés · más completo</option>
+          </select>
+          <p class="ocr-privacy">
+            Se descargarán el motor y los datos del idioma la primera vez.
+            Las imágenes y el texto reconocido no se envían al proveedor.
+          </p>
+          <div class="ocr-actions">
+            <button type="button" class="secondary-button" id="skip-ocr">Continuar sin OCR</button>
+            <button type="button" class="primary-button" id="start-ocr">Aplicar OCR local</button>
+          </div>
+        </section>
+      </div>
+    `;
+  }
+  if (state.ocrProgress) {
+    const progress = state.ocrProgress;
+    return `
+      <div class="modal-backdrop">
+        <section
+          class="ocr-dialog ocr-running"
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="ocr-progress-title"
+        >
+          <div class="ocr-symbol working" aria-hidden="true">OCR</div>
+          <p class="section-kicker">RECONOCIMIENTO LOCAL</p>
+          <h2 id="ocr-progress-title">Leyendo páginas escaneadas</h2>
+          <p class="ocr-file">${escapeHtml(progress.fileName)}</p>
+          <div class="ocr-progress-block" aria-live="polite">
+            <span id="ocr-progress-label">${escapeHtml(progress.label)}</span>
+            <div class="progress-track">
+              <i id="ocr-progress-bar" style="width:${Math.max(2, Math.min(100, progress.percent))}%"></i>
+            </div>
+            <small id="ocr-progress-value">${Math.round(progress.percent)} %</small>
+          </div>
+          <p class="ocr-privacy">
+            Podés cancelar sin modificar el archivo original ni incorporar un
+            índice incompleto.
+          </p>
+          <div class="ocr-actions single">
+            <button type="button" class="secondary-button" id="cancel-ocr">Cancelar OCR</button>
+          </div>
+        </section>
+      </div>
+    `;
+  }
+  return "";
+}
+
 function bindEvents(): void {
   bind("search-form", "submit", (event) => {
     event.preventDefault();
@@ -539,6 +649,9 @@ function bindEvents(): void {
     state.notice = "";
     render();
   });
+  bind("start-ocr", "click", acceptOcr);
+  bind("skip-ocr", "click", skipOcr);
+  bind("cancel-ocr", "click", cancelOcr);
 }
 
 async function runSearch(): Promise<void> {
@@ -603,11 +716,16 @@ async function importFiles(files: File[]): Promise<void> {
   if (!files.length) {
     return;
   }
+  activeImportController = new AbortController();
   state.busy = true;
   setNotice(`Leyendo ${files.length} archivo${files.length === 1 ? "" : "s"}…`, "info");
   render();
   try {
-    const sources = await parseFiles(files);
+    const sources = await parseFiles(files, {
+      signal: activeImportController.signal,
+      onOcrNeeded: requestOcrChoice,
+      onOcrProgress: handleOcrProgress,
+    });
     const chunks = chunksFromSources(sources);
     const base = currentBase();
     base.chunks.push(...chunks);
@@ -621,11 +739,99 @@ async function importFiles(files: File[]): Promise<void> {
     state.searched = false;
     state.hits = [];
   } catch (error) {
-    setNotice(errorMessage(error), "error");
+    setNotice(
+      errorMessage(error),
+      isOcrCancellation(error) ? "info" : "error",
+    );
   } finally {
     state.busy = false;
+    state.ocrPrompt = undefined;
+    state.ocrProgress = undefined;
+    resolveOcrChoice = undefined;
+    activeImportController = undefined;
     render();
   }
+}
+
+function requestOcrChoice(request: OcrRequest): Promise<OcrChoice> {
+  state.ocrPrompt = request;
+  state.ocrProgress = undefined;
+  render();
+  requestAnimationFrame(() => {
+    document.querySelector<HTMLButtonElement>("#start-ocr")?.focus();
+  });
+  return new Promise((resolve) => {
+    resolveOcrChoice = resolve;
+  });
+}
+
+function acceptOcr(): void {
+  const select = document.querySelector<HTMLSelectElement>("#ocr-language");
+  const language = isOcrLanguage(select?.value) ? select.value : "spa";
+  localStorage.setItem(OCR_LANGUAGE_KEY, language);
+  const request = state.ocrPrompt;
+  const resolve = resolveOcrChoice;
+  if (!request || !resolve) {
+    return;
+  }
+  state.ocrPrompt = undefined;
+  state.ocrProgress = {
+    fileName: request.fileName,
+    pageNumber: request.pageNumbers[0] ?? 1,
+    pageIndex: 0,
+    pageCount: request.pageNumbers.length,
+    label: "Preparando el motor OCR…",
+    percent: 1,
+  };
+  resolveOcrChoice = undefined;
+  render();
+  resolve({ enabled: true, language });
+}
+
+function skipOcr(): void {
+  const resolve = resolveOcrChoice;
+  if (!resolve) {
+    return;
+  }
+  state.ocrPrompt = undefined;
+  resolveOcrChoice = undefined;
+  render();
+  resolve({ enabled: false, language: preferredOcrLanguage() });
+}
+
+function cancelOcr(): void {
+  activeImportController?.abort();
+  const label = document.querySelector<HTMLElement>("#ocr-progress-label");
+  const button = document.querySelector<HTMLButtonElement>("#cancel-ocr");
+  if (label) {
+    label.textContent = "Cancelando OCR…";
+  }
+  if (button) {
+    button.disabled = true;
+  }
+}
+
+function handleOcrProgress(progress: OcrProgress): void {
+  state.ocrProgress = progress;
+  const label = document.querySelector<HTMLElement>("#ocr-progress-label");
+  const bar = document.querySelector<HTMLElement>("#ocr-progress-bar");
+  const value = document.querySelector<HTMLElement>("#ocr-progress-value");
+  if (!label || !bar || !value) {
+    render();
+    return;
+  }
+  label.textContent = progress.label;
+  bar.style.width = `${Math.max(2, Math.min(100, progress.percent))}%`;
+  value.textContent = `${Math.round(progress.percent)} %`;
+}
+
+function preferredOcrLanguage(): OcrLanguage {
+  const value = localStorage.getItem(OCR_LANGUAGE_KEY);
+  return isOcrLanguage(value) ? value : "spa";
+}
+
+function isOcrLanguage(value: string | null | undefined): value is OcrLanguage {
+  return value === "spa" || value === "eng" || value === "spa+eng";
 }
 
 async function importPastedText(): Promise<void> {

@@ -1,5 +1,12 @@
 import Papa from "papaparse";
 
+import {
+  pageNeedsOcr,
+  recognizePdfPages,
+  type OcrChoice,
+  type OcrProgress,
+  type OcrRequest,
+} from "./ocr";
 import type { ParsedSegment, ParsedSource, SourceChunk } from "./types";
 
 const MAX_FILE_BYTES = 45 * 1024 * 1024;
@@ -15,7 +22,16 @@ const TEXT_EXTENSIONS = new Set([
   "xml",
 ]);
 
-export async function parseFiles(files: File[]): Promise<ParsedSource[]> {
+export interface ParseFilesOptions {
+  signal?: AbortSignal;
+  onOcrNeeded?: (request: OcrRequest) => Promise<OcrChoice>;
+  onOcrProgress?: (progress: OcrProgress) => void;
+}
+
+export async function parseFiles(
+  files: File[],
+  options: ParseFilesOptions = {},
+): Promise<ParsedSource[]> {
   const sources: ParsedSource[] = [];
   for (const file of files) {
     if (file.size > MAX_FILE_BYTES) {
@@ -23,7 +39,7 @@ export async function parseFiles(files: File[]): Promise<ParsedSource[]> {
         `${file.name} supera el límite de 45 MB por archivo de la edición web.`,
       );
     }
-    sources.push(await parseFile(file));
+    sources.push(await parseFile(file, options));
   }
   return sources;
 }
@@ -65,12 +81,15 @@ export function sourceFromPastedText(
   };
 }
 
-async function parseFile(file: File): Promise<ParsedSource> {
+async function parseFile(
+  file: File,
+  options: ParseFilesOptions,
+): Promise<ParsedSource> {
   const extension = file.name.split(".").pop()?.toLowerCase() ?? "";
   let segments: ParsedSegment[];
 
   if (extension === "pdf") {
-    segments = await parsePdf(file);
+    segments = await parsePdf(file, options);
   } else if (extension === "docx") {
     segments = await parseDocx(file);
   } else if (extension === "csv" || extension === "tsv") {
@@ -101,29 +120,93 @@ async function parseFile(file: File): Promise<ParsedSource> {
   };
 }
 
-async function parsePdf(file: File): Promise<ParsedSegment[]> {
+async function parsePdf(
+  file: File,
+  options: ParseFilesOptions,
+): Promise<ParsedSegment[]> {
   const pdfjs = await import("pdfjs-dist");
   pdfjs.GlobalWorkerOptions.workerSrc = new URL(
     "pdfjs-dist/build/pdf.worker.min.mjs",
     import.meta.url,
   ).toString();
 
-  const document = await pdfjs.getDocument({
+  const pdfDocument = await pdfjs.getDocument({
     data: new Uint8Array(await file.arrayBuffer()),
   }).promise;
-  const segments: ParsedSegment[] = [];
+  const pages: Array<{ pageNumber: number; text: string }> = [];
 
-  for (let pageNumber = 1; pageNumber <= document.numPages; pageNumber += 1) {
-    const page = await document.getPage(pageNumber);
+  for (
+    let pageNumber = 1;
+    pageNumber <= pdfDocument.numPages;
+    pageNumber += 1
+  ) {
+    if (options.signal?.aborted) {
+      const error = new Error("Lectura cancelada.");
+      error.name = "AbortError";
+      throw error;
+    }
+    const page = await pdfDocument.getPage(pageNumber);
     const content = await page.getTextContent();
     const text = content.items
       .map((item) => ("str" in item ? item.str : ""))
       .join(" ")
       .replace(/\s+/g, " ")
       .trim();
-    if (text) {
-      segments.push({ text, location: `página ${pageNumber}` });
+    pages.push({ pageNumber, text });
+  }
+
+  const pageNumbersNeedingOcr = pages
+    .filter((page) => pageNeedsOcr(page.text))
+    .map((page) => page.pageNumber);
+  const ocrProcessedPages = new Set<number>();
+  if (pageNumbersNeedingOcr.length && options.onOcrNeeded) {
+    const choice = await options.onOcrNeeded({
+      fileName: file.name,
+      pageNumbers: pageNumbersNeedingOcr,
+      totalPages: pdfDocument.numPages,
+    });
+    if (choice.enabled) {
+      const ocrPages = await recognizePdfPages(
+        pdfDocument,
+        pageNumbersNeedingOcr,
+        {
+          fileName: file.name,
+          language: choice.language,
+          signal: options.signal,
+          onProgress: options.onOcrProgress,
+        },
+      );
+      const ocrByPage = new Map(
+        ocrPages.map((page) => [page.pageNumber, page]),
+      );
+      for (const page of pages) {
+        const ocrPage = ocrByPage.get(page.pageNumber);
+        if (ocrPage?.text) {
+          page.text = ocrPage.text;
+          ocrProcessedPages.add(page.pageNumber);
+        }
+      }
     }
+  }
+
+  const segments = pages
+    .filter(
+      (page) =>
+        page.text.trim() &&
+        (!pageNeedsOcr(page.text) || ocrProcessedPages.has(page.pageNumber)),
+    )
+    .map((page): ParsedSegment => {
+      const usedOcr = ocrProcessedPages.has(page.pageNumber);
+      return {
+        text: page.text,
+        location: `página ${page.pageNumber}${usedOcr ? " · OCR" : ""}`,
+        metadata: usedOcr ? { extracción: "OCR local" } : undefined,
+      };
+    });
+  if (!segments.length) {
+    throw new Error(
+      `${file.name} no contiene texto seleccionable. Volvé a cargarlo y elegí aplicar OCR.`,
+    );
   }
   return segments;
 }

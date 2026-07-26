@@ -13,6 +13,12 @@ materiales en el dispositivo de quien lo usa.
 - Al activar búsqueda por ideas, descarga el modelo público
   `Xenova/paraphrase-multilingual-MiniLM-L12-v2` y el runtime necesario. El
   contenido de la base y las consultas no se envían a Hugging Face.
+- Si un PDF contiene páginas sin texto seleccionable, ofrece OCR opcional con
+  Tesseract.js. El navegador descarga el motor y los datos de idioma desde la
+  infraestructura pública del paquete; las imágenes de las páginas y el texto
+  reconocido permanecen en el dispositivo.
+- Cancelar el OCR descarta el procesamiento incompleto y no modifica el PDF
+  original.
 - Exportar una base crea un archivo local sin embeddings.
 
 Los enlaces de fuentes del ejemplo solo se abren cuando la persona decide
@@ -36,4 +42,5 @@ Before publishing a fork or release, check that these folders are not included:
 - `data/`
 - `logs/`
 - `dist/`
+- `node_modules/`
 - any folder containing personal documents
