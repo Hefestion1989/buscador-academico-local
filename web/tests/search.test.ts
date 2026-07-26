@@ -8,6 +8,7 @@ import {
   searchChunks,
   selectEvidence,
 } from "../src/search";
+import { normalizeOcrText, pageNeedsOcr } from "../src/ocr";
 import { sourceFromPastedText } from "../src/parser";
 import type { SourceChunk } from "../src/types";
 
@@ -15,21 +16,21 @@ const chunks: SourceChunk[] = [
   {
     id: "1",
     sourceId: "historia",
-    sourceName: "Historia del DSM",
+    sourceName: "Historia del aprendizaje observacional",
     sourceType: "pdf",
     location: "página 121",
     text:
-      "Robert L. Spitzer presentó la propuesta. El 15 de diciembre de 1973, la junta directiva de la APA aceptó la recomendación y retiró la homosexualidad como trastorno del DSM-II.",
+      "Albert Bandura dirigió el estudio. El 12 de noviembre de 1961, el equipo presentó los resultados sobre aprendizaje observacional y conducta imitativa.",
     embedding: [1, 0],
   },
   {
     id: "2",
     sourceId: "manual",
-    sourceName: "DSM-5-TR",
+    sourceName: "Manual de memoria",
     sourceType: "pdf",
     location: "página 10",
     text:
-      "El manual moderno incluye procesos continuos de revisión y varios grupos de trabajo.",
+      "La práctica distribuida y el sueño ayudan a consolidar información en la memoria de largo plazo.",
     embedding: [0, 1],
   },
 ];
@@ -41,21 +42,21 @@ describe("normalización y búsqueda literal", () => {
     );
     expect(
       lexicalScore(
-        "homosexualidad DSM",
-        "La homosexualidad fue retirada del DSM-II.",
+        "práctica memoria",
+        "La práctica distribuida favorece la memoria de largo plazo.",
       ),
-    ).toBeGreaterThan(lexicalScore("homosexualidad DSM", "Revisión clínica."));
+    ).toBeGreaterThan(lexicalScore("práctica memoria", "Revisión clínica."));
   });
 
   it("lleva la fecha y la persona a la respuesta respaldada", () => {
     const query =
-      "¿Cuándo sacó la APA la homosexualidad del DSM y quién impulsó el cambio?";
+      "¿Cuándo presentó Bandura el estudio y quién dirigió el equipo?";
     const hits = searchChunks(query, chunks, "literal");
     const answer = buildEvidenceAnswer(query, hits);
 
-    expect(hits[0]?.sourceName).toBe("Historia del DSM");
-    expect(answer.passages[0]?.text).toContain("15 de diciembre de 1973");
-    expect(answer.passages.some((passage) => passage.text.includes("Spitzer"))).toBe(
+    expect(hits[0]?.sourceName).toBe("Historia del aprendizaje observacional");
+    expect(answer.passages[0]?.text).toContain("12 de noviembre de 1961");
+    expect(answer.passages.some((passage) => passage.text.includes("Bandura"))).toBe(
       true,
     );
   });
@@ -76,7 +77,7 @@ describe("normalización y búsqueda literal", () => {
 describe("búsqueda conceptual", () => {
   it("combina coseno y palabras en modo híbrido", () => {
     const hits = searchChunks(
-      "momento de despatologización de la orientación sexual",
+      "aprendizaje por observación e imitación",
       chunks,
       "hybrid",
       [0.98, 0.02],
@@ -94,9 +95,26 @@ describe("búsqueda conceptual", () => {
 
   it("elige una ventana centrada en la evidencia", () => {
     const filler = "Introducción general sin datos concretos. ".repeat(30);
-    const text = `${filler}El 15 de diciembre de 1973, la APA confirmó el cambio del DSM-II. ${filler}`;
-    expect(selectEvidence(text, "cuando confirmó APA DSM")).toContain(
-      "15 de diciembre de 1973",
+    const text = `${filler}El 12 de noviembre de 1961, Bandura presentó los resultados del aprendizaje observacional. ${filler}`;
+    expect(selectEvidence(text, "cuando presentó Bandura aprendizaje")).toContain(
+      "12 de noviembre de 1961",
+    );
+  });
+});
+
+describe("detección y normalización para OCR", () => {
+  it("detecta páginas sin suficiente texto seleccionable", () => {
+    expect(pageNeedsOcr("12")).toBe(true);
+    expect(
+      pageNeedsOcr(
+        "Este párrafo contiene suficiente texto seleccionable para buscarlo sin aplicar reconocimiento óptico.",
+      ),
+    ).toBe(false);
+  });
+
+  it("limpia espacios sin destruir la separación entre párrafos", () => {
+    expect(normalizeOcrText("Primera   línea\r\n\r\n\r\nSegunda línea  ")).toBe(
+      "Primera línea\n\nSegunda línea",
     );
   });
 });

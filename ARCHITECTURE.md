@@ -13,9 +13,9 @@ una conclusión sin mostrar evidencia.
 ## Flujo de la edición web
 
 ```text
-PDF / DOCX / texto / CSV / JSON
+PDF / PDF escaneado / DOCX / texto / CSV / JSON
         ↓
-extracción con página, fila o línea
+extracción u OCR con página, fila o línea
         ↓
 fragmentos de hasta ~1.050 caracteres
         ↓
@@ -32,7 +32,9 @@ respuesta extractiva + fuente + ubicación
 
 ### Ingesta
 
-- PDF: PDF.js, una secuencia por página.
+- PDF con texto: PDF.js, una secuencia por página.
+- PDF escaneado: detección por página, confirmación y OCR local con PDF.js +
+  Tesseract.js; la ubicación queda marcada como OCR.
 - DOCX: Mammoth, texto del documento.
 - CSV/TSV: Papa Parse, un registro por fila.
 - JSON/JSONL: objetos aplanados, un registro por elemento.
@@ -81,7 +83,8 @@ los fragmentos recuperados.
 ## Límites honestos
 
 - Una coincidencia no prueba que la fuente sea verdadera o suficiente.
-- Los PDF escaneados requieren OCR.
+- El OCR prioriza texto impreso. Manuscritos, fotografías torcidas o escaneos
+  degradados pueden necesitar revisión humana.
 - Página, párrafo o línea pueden ser aproximados según el formato.
 - Un modelo de embeddings recupera cercanía conceptual; no razona ni verifica
   hechos por sí solo.

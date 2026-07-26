@@ -19,11 +19,13 @@ El proyecto tiene dos ediciones complementarias:
 La base de ejemplo permite probar una pregunta concreta:
 
 ```text
-¿Cuándo sacó la APA la homosexualidad del DSM, quién participó y en qué momento?
+¿Cómo ayudan el sueño y la práctica distribuida a consolidar la memoria?
 ```
 
-La respuesta muestra la fecha, los actores y el lugar exacto de cada mención.
-No genera una afirmación sin enseñar primero la evidencia recuperada.
+La herramienta no está limitada a psicología: cada persona crea una base, sube
+materiales de estudio, investigación o trabajo y busca dentro de ese contenido.
+La respuesta muestra el fragmento y su ubicación sin inventar información que
+no aparezca en las fuentes.
 
 ## Why This Exists
 
@@ -41,6 +43,8 @@ camino entre una pregunta y el pasaje verificable que puede responderla.
 - Priorizar fechas, personas y acciones cuando la pregunta las pide.
 - Mostrar respuesta extractiva, fragmento completo, fuente y ubicación.
 - Importar documentos y datos tabulares o estructurados.
+- Detectar páginas de PDF escaneadas y ofrecer OCR local en español, inglés o
+  ambos, con progreso y cancelación.
 - Crear varias bases, persistirlas en IndexedDB y exportarlas como JSON.
 - Indexar carpetas completas con la edición Python.
 - Usar opcionalmente un modelo generativo local compatible con OpenAI en
@@ -54,6 +58,8 @@ Por defecto, ninguna edición sube documentos a un servidor.
   IndexedDB.
 - Al activar búsqueda por ideas, el navegador descarga los archivos públicos
   del modelo desde Hugging Face; los textos no se envían al proveedor.
+- Al aceptar OCR, descarga el motor Tesseract y los datos del idioma; las
+  páginas se renderizan y reconocen dentro del navegador.
 - En escritorio, embeddings e índice se generan localmente bajo `data/`.
 - La integración generativa opcional solo acepta `localhost`, `127.0.0.1` o
   `::1`.
@@ -208,7 +214,8 @@ The `.gitignore` is configured defensively to avoid this.
 
 ## Limitations
 
-- Scanned image PDFs need OCR before they can be searched.
+- Los PDF escaneados se detectan y pueden procesarse con OCR desde la misma
+  edición web. La calidad depende de la nitidez, orientación y tipografía.
 - Page/paragraph locations are approximate.
 - Large PDFs can take time during first indexing.
 - `.doc` and spreadsheet files are not indexed yet.
