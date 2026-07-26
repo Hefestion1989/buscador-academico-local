@@ -379,7 +379,11 @@ def _rank_claims(
                 continue
             if require_anchor and not contains_any_anchor(unit, anchors):
                 continue
-            score = keyword_overlap(query, unit) * 0.62 + result.relevance * 0.38
+            score = (
+                keyword_overlap(query, unit) * 0.52
+                + result.relevance * 0.30
+                + question_intent_bonus(query, unit)
+            )
             if contains_any_anchor(unit, anchors):
                 score += 0.18
             if score >= 0.18:
@@ -428,14 +432,61 @@ def contains_any_anchor(text: str, anchors: set[str]) -> bool:
 
 
 def split_units(text: str) -> list[str]:
+    # PDF extractors preserve visual line wraps. Splitting on every newline turns
+    # a complete sentence into several lowercase fragments, which then prevents
+    # the most useful evidence from reaching the answer.
+    text = re.sub(r"\s+", " ", text).strip()
     units: list[str] = []
-    for paragraph in re.split(r"\n+|(?<=[.!?])\s+", text):
+    for paragraph in re.split(r"(?<=[.!?])\s+", text):
         paragraph = paragraph.strip(" -\t\r\n")
         if 70 <= len(paragraph) <= 520:
             units.append(paragraph)
         elif len(paragraph) > 520:
             units.extend(chunk_long_unit(paragraph))
     return units
+
+
+def question_intent_bonus(query: str, text: str) -> float:
+    normalized_query = normalize_query(query)
+    bonus = 0.0
+
+    if any(term in normalized_query for term in ("cuando", "fecha", "momento", "ano")):
+        if re.search(
+            r"\b\d{1,2}\s+de\s+[a-záéíóúñ]+\s+de\s+(?:18|19|20)\d{2}\b",
+            text,
+            flags=re.IGNORECASE,
+        ):
+            bonus += 0.48
+        elif re.search(r"\b(?:18|19|20)\d{2}\b", text):
+            bonus += 0.28
+
+    if any(term in normalized_query for term in ("quien", "quienes", "persona", "autor")):
+        if re.search(
+            r"\b[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+(?:\s+[A-ZÁÉÍÓÚÑ][a-záéíóúñ]+)+\b",
+            text,
+        ):
+            bonus += 0.16
+
+    if any(
+        term in normalized_query
+        for term in ("saco", "retiro", "elimino", "acepto", "cambio", "dejo")
+    ):
+        normalized_text = normalize_query(text)
+        if any(
+            term in normalized_text
+            for term in (
+                "suprim",
+                "retir",
+                "elimin",
+                "acept",
+                "reemplaz",
+                "dejo de",
+                "cambio",
+            )
+        ):
+            bonus += 0.18
+
+    return bonus
 
 
 def chunk_long_unit(text: str, size: int = 360) -> list[str]:

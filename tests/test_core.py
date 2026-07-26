@@ -10,6 +10,7 @@ from app.indexer import add_in_batches, safe_relative, stable_chunk_id
 from app.local_llm import is_local_url
 from app.scanner import iter_document_files, path_is_inside
 from app.search import canonical_source_key, keyword_overlap, normalize_text, SearchResult
+from app.answer import build_extractive_answer, rank_claims, split_units
 
 
 class ChunkerTests(unittest.TestCase):
@@ -170,6 +171,69 @@ class SearchAndPrivacyTests(unittest.TestCase):
             canonical_source_key(result("Materia/Copia de Territorio 1.pdf")),
             canonical_source_key(result("Materia/Territorio.pdf")),
         )
+
+    def test_pdf_line_wraps_are_rejoined_before_sentence_ranking(self) -> None:
+        units = split_units(
+            "El 15 de diciembre de 1973, la junta directiva de la\n"
+            "APA aceptó la recomendación del consejo y el cambio se\n"
+            "introdujo oficialmente como una revisión del DSM-II.\n"
+            "Spitzer fue una figura central en la propuesta."
+        )
+
+        self.assertEqual(
+            units[0],
+            (
+                "El 15 de diciembre de 1973, la junta directiva de la APA "
+                "aceptó la recomendación del consejo y el cambio se introdujo "
+                "oficialmente como una revisión del DSM-II."
+            ),
+        )
+
+    def test_factual_question_prioritizes_date_and_named_actor(self) -> None:
+        def result(snippet: str, relevance: float) -> SearchResult:
+            return SearchResult(
+                file_name="historia.pdf",
+                relative_path="historia.pdf",
+                source_path="historia.pdf",
+                location="pagina 121",
+                snippet=snippet,
+                relevance=relevance,
+                semantic_relevance=relevance,
+                keyword_score=0.0,
+                title_score=0.0,
+                distance=1.0 - relevance,
+                low_signal_penalty=0.0,
+            )
+
+        results = [
+            result(
+                (
+                    "Cuando la propuesta de Robert Spitzer llegó al consejo de la APA, "
+                    "sus miembros votaron por suprimir del DSM-II el diagnóstico de "
+                    "homosexualidad. El 15 de diciembre de 1973, la junta directiva de "
+                    "la APA aceptó la recomendación y el cambio se hizo oficial."
+                ),
+                0.63,
+            ),
+            result(
+                (
+                    "En 2019 la APA comenzó a revisar otros materiales del DSM-5-TR "
+                    "con varios comités técnicos y grupos de trabajo."
+                ),
+                0.67,
+            ),
+        ]
+
+        query = (
+            "cuando fue que la APA saco la homosexualidad del DSM, "
+            "quien fue y en que momento"
+        )
+        claims = rank_claims(query, results)
+        answer = build_extractive_answer(query, results)
+
+        self.assertIn("15 de diciembre de 1973", claims[0][0])
+        self.assertIn("15 de diciembre de 1973", answer)
+        self.assertIn("[1]", answer)
 
 
 if __name__ == "__main__":
