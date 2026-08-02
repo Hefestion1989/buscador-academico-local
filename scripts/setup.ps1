@@ -10,7 +10,7 @@ if (-not (Test-Path ".\.venv\Scripts\python.exe")) {
 
 $VenvPython = ".\.venv\Scripts\python.exe"
 & $VenvPython -m pip install --upgrade pip
-& $VenvPython -m pip install -r requirements.txt
+& $VenvPython -m pip install -r requirements.txt -c constraints-security.txt
 
 $env:ACADEMIC_SEARCH_ALLOW_DOWNLOAD = "1"
 Write-Host "Descargando o verificando el modelo semantico local..."
